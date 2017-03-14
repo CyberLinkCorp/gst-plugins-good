@@ -41,35 +41,32 @@
 #include "config.h"
 #endif
 
-#include <gst/gst.h>
-#include "gstclimagefreeze.h"
+#include <gst/glib-compat-private.h>
 
-static void gst_climage_freeze_finalize (GObject * object);
+#include "gstimagefreeze.h"
 
-static void gst_climage_freeze_reset (GstCLImageFreeze * self);
+static void gst_image_freeze_finalize (GObject * object);
 
-static GstStateChangeReturn gst_climage_freeze_change_state (GstElement * element,
+static void gst_image_freeze_reset (GstImageFreeze * self);
+
+static GstStateChangeReturn gst_image_freeze_change_state (GstElement * element,
     GstStateChange transition);
 
-static GstFlowReturn gst_climage_freeze_sink_chain (GstPad * pad,
+static GstFlowReturn gst_image_freeze_sink_chain (GstPad * pad,
     GstObject * parent, GstBuffer * buffer);
-static gboolean gst_climage_freeze_sink_event (GstPad * pad, GstObject * parent,
+static gboolean gst_image_freeze_sink_event (GstPad * pad, GstObject * parent,
     GstEvent * event);
-static gboolean gst_climage_freeze_sink_setcaps (GstCLImageFreeze * self,
+static gboolean gst_image_freeze_sink_setcaps (GstImageFreeze * self,
     GstCaps * caps);
-static GstCaps *gst_climage_freeze_sink_getcaps (GstCLImageFreeze * self,
+static GstCaps *gst_image_freeze_sink_getcaps (GstImageFreeze * self,
     GstCaps * filter);
-static gboolean gst_climage_freeze_sink_query (GstPad * pad, GstObject * parent,
+static gboolean gst_image_freeze_sink_query (GstPad * pad, GstObject * parent,
     GstQuery * query);
-static void gst_climage_freeze_src_loop (GstPad * pad);
-static gboolean gst_climage_freeze_src_event (GstPad * pad, GstObject * parent,
+static void gst_image_freeze_src_loop (GstPad * pad);
+static gboolean gst_image_freeze_src_event (GstPad * pad, GstObject * parent,
     GstEvent * event);
-static gboolean gst_climage_freeze_src_query (GstPad * pad, GstObject * parent,
+static gboolean gst_image_freeze_src_query (GstPad * pad, GstObject * parent,
     GstQuery * query);
-static void gst_climage_freeze_set_property (GObject * object, guint prop_id,
-                                             const GValue * value, GParamSpec * pspec);
-static void gst_climage_freeze_get_property (GObject * object, guint prop_id,
-                                             GValue * value, GParamSpec * pspec);
 
 static GstStaticPadTemplate sink_pad_template = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
@@ -80,120 +77,68 @@ static GstStaticPadTemplate src_pad_template =
 GST_STATIC_PAD_TEMPLATE ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
     GST_STATIC_CAPS ("video/x-raw"));
 
-GST_DEBUG_CATEGORY_STATIC (gst_climage_freeze_debug);
-#define GST_CAT_DEFAULT gst_climage_freeze_debug
+GST_DEBUG_CATEGORY_STATIC (gst_image_freeze_debug);
+#define GST_CAT_DEFAULT gst_image_freeze_debug
 
-#define gst_climage_freeze_parent_class parent_class
-G_DEFINE_TYPE (GstCLImageFreeze, gst_climage_freeze, GST_TYPE_ELEMENT);
+#define gst_image_freeze_parent_class parent_class
+G_DEFINE_TYPE (GstImageFreeze, gst_image_freeze, GST_TYPE_ELEMENT);
 
-enum {
-    PROP_DURATION = 1,
-    N_PROPERTIES
-};
-
-static GParamSpec *obj_properties[N_PROPERTIES] = { NULL, };
 
 static void
-gst_climage_freeze_class_init (GstCLImageFreezeClass * klass)
+gst_image_freeze_class_init (GstImageFreezeClass * klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstElementClass *gstelement_class = GST_ELEMENT_CLASS (klass);
 
-  gobject_class->finalize = gst_climage_freeze_finalize;
+  gobject_class->finalize = gst_image_freeze_finalize;
 
   gstelement_class->change_state =
-      GST_DEBUG_FUNCPTR (gst_climage_freeze_change_state);
+      GST_DEBUG_FUNCPTR (gst_image_freeze_change_state);
 
-  gst_element_class_set_metadata (gstelement_class,
+  gst_element_class_set_static_metadata (gstelement_class,
       "Still frame stream generator",
       "Filter/Video",
       "Generates a still frame stream from an image",
-      "mika_wang <mika_wang@cyberlink.com>");
+      "Sebastian Dröge <sebastian.droege@collabora.co.uk>");
 
   gst_element_class_add_static_pad_template (gstelement_class,
       &sink_pad_template);
   gst_element_class_add_static_pad_template (gstelement_class,
       &src_pad_template);
-    
-    /* define property set/get virtual function pointers */
-    gobject_class->set_property = gst_climage_freeze_set_property;
-    gobject_class->get_property = gst_climage_freeze_get_property;
-  
-    /* define & install properties */
-    obj_properties[PROP_DURATION] =
-    g_param_spec_uint64("duration",
-                        "Duration",
-                        "Playback duration, unit : nanosecond",
-                        0, G_MAXUINT64, 1000000000, // default 1 second
-                        G_PARAM_READWRITE);
-    
-    g_object_class_install_properties(gobject_class, N_PROPERTIES, obj_properties);
 }
 
 static void
-gst_climage_freeze_set_property (GObject * object, guint prop_id,
-                                 const GValue * value, GParamSpec * pspec)
-{
-    GstCLImageFreeze *self = GST_CLIMAGE_FREEZE(object);
-    
-    switch (prop_id) {
-        case PROP_DURATION:
-            self->m_duration = g_value_get_uint64(value);
-            break;
-            
-        default:
-            break;
-    }
-}
-
-static void
-gst_climage_freeze_get_property (GObject * object, guint prop_id,
-                                 GValue * value, GParamSpec * pspec)
-{
-    GstCLImageFreeze *self = GST_CLIMAGE_FREEZE(object);
-    
-    switch (prop_id) {
-        case PROP_DURATION:
-            g_value_set_uint64(value, self->m_duration);
-            break;
-            
-        default:
-            break;
-    }
-}
-
-static void
-gst_climage_freeze_init (GstCLImageFreeze * self)
+gst_image_freeze_init (GstImageFreeze * self)
 {
   self->sinkpad = gst_pad_new_from_static_template (&sink_pad_template, "sink");
   gst_pad_set_chain_function (self->sinkpad,
-      GST_DEBUG_FUNCPTR (gst_climage_freeze_sink_chain));
+      GST_DEBUG_FUNCPTR (gst_image_freeze_sink_chain));
   gst_pad_set_event_function (self->sinkpad,
-      GST_DEBUG_FUNCPTR (gst_climage_freeze_sink_event));
+      GST_DEBUG_FUNCPTR (gst_image_freeze_sink_event));
   gst_pad_set_query_function (self->sinkpad,
-      GST_DEBUG_FUNCPTR (gst_climage_freeze_sink_query));
+      GST_DEBUG_FUNCPTR (gst_image_freeze_sink_query));
   GST_PAD_SET_PROXY_ALLOCATION (self->sinkpad);
   gst_element_add_pad (GST_ELEMENT (self), self->sinkpad);
 
   self->srcpad = gst_pad_new_from_static_template (&src_pad_template, "src");
   gst_pad_set_event_function (self->srcpad,
-      GST_DEBUG_FUNCPTR (gst_climage_freeze_src_event));
+      GST_DEBUG_FUNCPTR (gst_image_freeze_src_event));
   gst_pad_set_query_function (self->srcpad,
-      GST_DEBUG_FUNCPTR (gst_climage_freeze_src_query));
+      GST_DEBUG_FUNCPTR (gst_image_freeze_src_query));
   gst_pad_use_fixed_caps (self->srcpad);
   gst_element_add_pad (GST_ELEMENT (self), self->srcpad);
 
   g_mutex_init (&self->lock);
 
-  gst_climage_freeze_reset (self);
+  gst_image_freeze_reset (self);
 }
 
 static void
-gst_climage_freeze_finalize (GObject * object)
+gst_image_freeze_finalize (GObject * object)
 {
-  GstCLImageFreeze *self = GST_CLIMAGE_FREEZE (object);
+  GstImageFreeze *self = GST_IMAGE_FREEZE (object);
 
-  gst_climage_freeze_reset (self);
+  gst_image_freeze_reset (self);
 
   g_mutex_clear (&self->lock);
 
@@ -201,7 +146,7 @@ gst_climage_freeze_finalize (GObject * object)
 }
 
 static void
-gst_climage_freeze_reset (GstCLImageFreeze * self)
+gst_image_freeze_reset (GstImageFreeze * self)
 {
   GST_DEBUG_OBJECT (self, "Resetting internal state");
 
@@ -214,14 +159,13 @@ gst_climage_freeze_reset (GstCLImageFreeze * self)
   self->fps_n = self->fps_d = 0;
   self->offset = 0;
   self->seqnum = 0;
-    
   g_mutex_unlock (&self->lock);
 
   g_atomic_int_set (&self->seeking, 0);
 }
 
 static gboolean
-gst_climage_freeze_sink_setcaps (GstCLImageFreeze * self, GstCaps * caps)
+gst_image_freeze_sink_setcaps (GstImageFreeze * self, GstCaps * caps)
 {
   gboolean ret = FALSE;
   GstStructure *s;
@@ -300,7 +244,7 @@ gst_climage_freeze_sink_setcaps (GstCLImageFreeze * self, GstCaps * caps)
 
 /* remove framerate in writable @caps */
 static void
-gst_climage_freeze_remove_fps (GstCLImageFreeze * self, GstCaps * caps)
+gst_image_freeze_remove_fps (GstImageFreeze * self, GstCaps * caps)
 {
   gint i, n;
 
@@ -315,20 +259,16 @@ gst_climage_freeze_remove_fps (GstCLImageFreeze * self, GstCaps * caps)
 }
 
 static GstCaps *
-gst_climage_freeze_sink_getcaps (GstCLImageFreeze * self, GstCaps * filter)
+gst_image_freeze_sink_getcaps (GstImageFreeze * self, GstCaps * filter)
 {
   GstCaps *ret, *tmp, *templ;
   GstPad *pad;
 
   pad = self->sinkpad;
-  ret = gst_pad_get_current_caps (pad);
-  if (ret != NULL) {
-    goto done;
-  }
 
   if (filter) {
     filter = gst_caps_copy (filter);
-    gst_climage_freeze_remove_fps (self, filter);
+    gst_image_freeze_remove_fps (self, filter);
   }
   templ = gst_pad_get_pad_template_caps (pad);
   tmp = gst_pad_peer_query_caps (self->srcpad, filter);
@@ -346,18 +286,17 @@ gst_climage_freeze_sink_getcaps (GstCLImageFreeze * self, GstCaps * filter)
     gst_caps_unref (filter);
 
   ret = gst_caps_make_writable (ret);
-  gst_climage_freeze_remove_fps (self, ret);
+  gst_image_freeze_remove_fps (self, ret);
 
-done:
   GST_LOG_OBJECT (pad, "Returning caps: %" GST_PTR_FORMAT, ret);
 
   return ret;
 }
 
 static gboolean
-gst_climage_freeze_sink_query (GstPad * pad, GstObject * parent, GstQuery * query)
+gst_image_freeze_sink_query (GstPad * pad, GstObject * parent, GstQuery * query)
 {
-  GstCLImageFreeze *self = GST_CLIMAGE_FREEZE (parent);
+  GstImageFreeze *self = GST_IMAGE_FREEZE (parent);
   gboolean ret;
 
   GST_LOG_OBJECT (pad, "Handling query of type '%s'",
@@ -369,7 +308,7 @@ gst_climage_freeze_sink_query (GstPad * pad, GstObject * parent, GstQuery * quer
       GstCaps *caps;
 
       gst_query_parse_caps (query, &caps);
-      caps = gst_climage_freeze_sink_getcaps (self, caps);
+      caps = gst_image_freeze_sink_getcaps (self, caps);
       gst_query_set_caps_result (query, caps);
       gst_caps_unref (caps);
       ret = TRUE;
@@ -383,7 +322,7 @@ gst_climage_freeze_sink_query (GstPad * pad, GstObject * parent, GstQuery * quer
 }
 
 static gboolean
-gst_climage_freeze_convert (GstCLImageFreeze * self,
+gst_image_freeze_convert (GstImageFreeze * self,
     GstFormat src_format, gint64 src_value,
     GstFormat * dest_format, gint64 * dest_value)
 {
@@ -441,9 +380,9 @@ gst_climage_freeze_convert (GstCLImageFreeze * self,
 }
 
 static gboolean
-gst_climage_freeze_src_query (GstPad * pad, GstObject * parent, GstQuery * query)
+gst_image_freeze_src_query (GstPad * pad, GstObject * parent, GstQuery * query)
 {
-  GstCLImageFreeze *self = GST_CLIMAGE_FREEZE (parent);
+  GstImageFreeze *self = GST_IMAGE_FREEZE (parent);
   gboolean ret = FALSE;
 
   GST_LOG_OBJECT (pad, "Handling query of type '%s'",
@@ -457,7 +396,7 @@ gst_climage_freeze_src_query (GstPad * pad, GstObject * parent, GstQuery * query
       gst_query_parse_convert (query, &src_format, &src_value, &dest_format,
           &dest_value);
       ret =
-          gst_climage_freeze_convert (self, src_format, src_value, &dest_format,
+          gst_image_freeze_convert (self, src_format, src_value, &dest_format,
           &dest_value);
       if (ret)
         gst_query_set_convert (query, src_format, src_value, dest_format,
@@ -466,7 +405,7 @@ gst_climage_freeze_src_query (GstPad * pad, GstObject * parent, GstQuery * query
     }
     case GST_QUERY_POSITION:{
       GstFormat format;
-      gint64 position = 0;
+      gint64 position;
 
       gst_query_parse_position (query, &format, NULL);
       switch (format) {
@@ -500,7 +439,7 @@ gst_climage_freeze_src_query (GstPad * pad, GstObject * parent, GstQuery * query
     }
     case GST_QUERY_DURATION:{
       GstFormat format;
-      gint64 duration = 0;
+      gint64 duration;
 
       gst_query_parse_duration (query, &format, NULL);
       switch (format) {
@@ -564,9 +503,9 @@ gst_climage_freeze_src_query (GstPad * pad, GstObject * parent, GstQuery * query
 
 
 static gboolean
-gst_climage_freeze_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
+gst_image_freeze_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
 {
-  GstCLImageFreeze *self = GST_CLIMAGE_FREEZE (parent);
+  GstImageFreeze *self = GST_IMAGE_FREEZE (parent);
   gboolean ret;
 
   GST_LOG_OBJECT (pad, "Got %s event", GST_EVENT_TYPE_NAME (event));
@@ -577,7 +516,7 @@ gst_climage_freeze_sink_event (GstPad * pad, GstObject * parent, GstEvent * even
       GstCaps *caps;
 
       gst_event_parse_caps (event, &caps);
-      gst_climage_freeze_sink_setcaps (self, caps);
+      gst_image_freeze_sink_setcaps (self, caps);
       gst_event_unref (event);
       ret = TRUE;
       break;
@@ -596,7 +535,7 @@ gst_climage_freeze_sink_event (GstPad * pad, GstObject * parent, GstEvent * even
       ret = TRUE;
       break;
     case GST_EVENT_FLUSH_START:
-      gst_climage_freeze_reset (self);
+      gst_image_freeze_reset (self);
       /* fall through */
     default:
       ret = gst_pad_push_event (self->srcpad, event);
@@ -607,9 +546,9 @@ gst_climage_freeze_sink_event (GstPad * pad, GstObject * parent, GstEvent * even
 }
 
 static gboolean
-gst_climage_freeze_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
+gst_image_freeze_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
 {
-  GstCLImageFreeze *self = GST_CLIMAGE_FREEZE (parent);
+  GstImageFreeze *self = GST_IMAGE_FREEZE (parent);
   gboolean ret;
 
   GST_LOG_OBJECT (pad, "Got %s event", GST_EVENT_TYPE_NAME (event));
@@ -649,9 +588,9 @@ gst_climage_freeze_src_event (GstPad * pad, GstObject * parent, GstEvent * event
 
       if (format == GST_FORMAT_DEFAULT) {
         format = GST_FORMAT_TIME;
-        if (!gst_climage_freeze_convert (self, GST_FORMAT_DEFAULT, start, &format,
+        if (!gst_image_freeze_convert (self, GST_FORMAT_DEFAULT, start, &format,
                 &start)
-            || !gst_climage_freeze_convert (self, GST_FORMAT_DEFAULT, stop,
+            || !gst_image_freeze_convert (self, GST_FORMAT_DEFAULT, stop,
                 &format, &stop)
             || start == -1 || stop == -1) {
           GST_ERROR_OBJECT (pad,
@@ -712,7 +651,7 @@ gst_climage_freeze_src_event (GstPad * pad, GstObject * parent, GstEvent * event
 
         if (self->buffer != NULL)
           gst_pad_start_task (self->srcpad,
-              (GstTaskFunction) gst_climage_freeze_src_loop, self->srcpad, NULL);
+              (GstTaskFunction) gst_image_freeze_src_loop, self->srcpad, NULL);
 
         g_mutex_unlock (&self->lock);
       }
@@ -721,7 +660,7 @@ gst_climage_freeze_src_event (GstPad * pad, GstObject * parent, GstEvent * event
       break;
     }
     case GST_EVENT_FLUSH_START:
-      gst_climage_freeze_reset (self);
+      gst_image_freeze_reset (self);
       /* fall through */
     default:
       ret = gst_pad_push_event (self->sinkpad, event);
@@ -732,10 +671,10 @@ gst_climage_freeze_src_event (GstPad * pad, GstObject * parent, GstEvent * event
 }
 
 static GstFlowReturn
-gst_climage_freeze_sink_chain (GstPad * pad, GstObject * parent,
+gst_image_freeze_sink_chain (GstPad * pad, GstObject * parent,
     GstBuffer * buffer)
 {
-  GstCLImageFreeze *self = GST_CLIMAGE_FREEZE (parent);
+  GstImageFreeze *self = GST_IMAGE_FREEZE (parent);
 
   g_mutex_lock (&self->lock);
   if (self->buffer) {
@@ -747,20 +686,20 @@ gst_climage_freeze_sink_chain (GstPad * pad, GstObject * parent,
 
   self->buffer = buffer;
 
-  gst_pad_start_task (self->srcpad, (GstTaskFunction) gst_climage_freeze_src_loop,
+  gst_pad_start_task (self->srcpad, (GstTaskFunction) gst_image_freeze_src_loop,
       self->srcpad, NULL);
   g_mutex_unlock (&self->lock);
   return GST_FLOW_EOS;
 }
 
 static void
-gst_climage_freeze_src_loop (GstPad * pad)
+gst_image_freeze_src_loop (GstPad * pad)
 {
-  GstCLImageFreeze *self = GST_CLIMAGE_FREEZE (GST_PAD_PARENT (pad));
+  GstImageFreeze *self = GST_IMAGE_FREEZE (GST_PAD_PARENT (pad));
   GstBuffer *buffer;
   guint64 offset;
   GstClockTime timestamp, timestamp_end;
-  guint64 cstart = 0, cstop = 0;
+  guint64 cstart, cstop;
   gboolean in_seg, eos;
   GstFlowReturn flow_ret = GST_FLOW_OK;
 
@@ -785,16 +724,6 @@ gst_climage_freeze_src_loop (GstPad * pad)
   if (self->need_segment) {
     GstEvent *e;
 
-      /* Set playback duration */
-      if (self->m_duration < 0)
-      {
-          flow_ret = GST_FLOW_ERROR;
-          g_mutex_unlock(&self->lock);
-          goto pause_task;
-      }
-      self->segment.start = 0;
-      self->segment.stop = self->m_duration;
-      
     GST_DEBUG_OBJECT (pad, "Pushing SEGMENT event: %" GST_SEGMENT_FORMAT,
         &self->segment);
     e = gst_event_new_segment (&self->segment);
@@ -931,18 +860,18 @@ pause_task:
 }
 
 static GstStateChangeReturn
-gst_climage_freeze_change_state (GstElement * element, GstStateChange transition)
+gst_image_freeze_change_state (GstElement * element, GstStateChange transition)
 {
-  GstCLImageFreeze *self = GST_CLIMAGE_FREEZE (element);
+  GstImageFreeze *self = GST_IMAGE_FREEZE (element);
   GstStateChangeReturn ret = GST_STATE_CHANGE_SUCCESS;
 
   switch (transition) {
     case GST_STATE_CHANGE_READY_TO_PAUSED:
-      gst_climage_freeze_reset (self);
+      gst_image_freeze_reset (self);
       break;
     case GST_STATE_CHANGE_PAUSED_TO_READY:
       gst_pad_stop_task (self->srcpad);
-      gst_climage_freeze_reset (self);
+      gst_image_freeze_reset (self);
       break;
     default:
       break;
@@ -962,29 +891,18 @@ gst_climage_freeze_change_state (GstElement * element, GstStateChange transition
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  GST_DEBUG_CATEGORY_INIT (gst_climage_freeze_debug, "climagefreeze", 0,
-      "climagefreeze element");
+  GST_DEBUG_CATEGORY_INIT (gst_image_freeze_debug, "imagefreeze", 0,
+      "imagefreeze element");
 
-  if (!gst_element_register (plugin, "climagefreeze", GST_RANK_NONE,
-          GST_TYPE_CLIMAGE_FREEZE))
+  if (!gst_element_register (plugin, "imagefreeze", GST_RANK_NONE,
+          GST_TYPE_IMAGE_FREEZE))
     return FALSE;
 
-  GST_LOG_OBJECT(plugin,"gst_gl_clvideo_transform_plugin_init Success\n");
-    
   return TRUE;
 }
 
-#ifndef PACKAGE
-#define PACKAGE "mediabox"
-#endif
-
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
-                   GST_VERSION_MINOR,
-                   CLImageFreeze,
-                   "CyberLink Still frame stream generator",
-                   plugin_init,
-                   "1.0.0",
-                   "Proprietary",
-                   "mediabox",
-                   "CyberLink")
-
+    GST_VERSION_MINOR,
+    imagefreeze,
+    "Still frame stream generator",
+    plugin_init, VERSION, "LGPL", GST_PACKAGE_NAME, GST_PACKAGE_ORIGIN)

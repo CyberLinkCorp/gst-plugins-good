@@ -17,29 +17,29 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef __GST_CLIMAGE_FREEZE_H__
-#define __GST_CLIMAGE_FREEZE_H__
+#ifndef __GST_IMAGE_FREEZE_H__
+#define __GST_IMAGE_FREEZE_H__
 
 #include <gst/gst.h>
 
 G_BEGIN_DECLS
 
-#define GST_TYPE_CLIMAGE_FREEZE \
-  (gst_climage_freeze_get_type())
-#define GST_CLIMAGE_FREEZE(obj) \
-  (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_CLIMAGE_FREEZE,GstCLImageFreeze))
-#define GST_CLIMAGE_FREEZE_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_CLIMAGE_FREEZE,GstCLImageFreezeClass))
-#define GST_CLIMAGE_FREEZE_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS ((obj),GST_TYPE_CLIMAGE_FREEZE,GstCLImageFreezeClass))
-#define GST_IS_CLIMAGE_FREEZE(obj) \
-  (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_CLIMAGE_FREEZE))
-#define GST_IS_CLIMAGE_FREEZE_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_CLIMAGE_FREEZE))
+#define GST_TYPE_IMAGE_FREEZE \
+  (gst_image_freeze_get_type())
+#define GST_IMAGE_FREEZE(obj) \
+  (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_IMAGE_FREEZE,GstImageFreeze))
+#define GST_IMAGE_FREEZE_CLASS(klass) \
+  (G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_IMAGE_FREEZE,GstImageFreezeClass))
+#define GST_IMAGE_FREEZE_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS ((obj),GST_TYPE_IMAGE_FREEZE,GstImageFreezeClass))
+#define GST_IS_IMAGE_FREEZE(obj) \
+  (G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_IMAGE_FREEZE))
+#define GST_IS_IMAGE_FREEZE_CLASS(klass) \
+  (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_IMAGE_FREEZE))
 
-typedef struct _GstCLImageFreeze GstCLImageFreeze;
-typedef struct _GstCLImageFreezeClass GstCLImageFreezeClass;
+typedef struct _GstImageFreeze GstImageFreeze;
+typedef struct _GstImageFreezeClass GstImageFreezeClass;
 
-struct _GstCLImageFreeze
+struct _GstImageFreeze
 {
   GstElement parent;
 
@@ -60,22 +60,15 @@ struct _GstCLImageFreeze
   /* TRUE if currently doing a flushing seek, protected
    * by srcpad's stream lock */
   gint seeking;
-    
-    /* Duration got from client */
-    guint64 m_duration;
-    
-    /* velocity matrix for duration calculation */
-    float m_velocity[3];
 };
 
-struct _GstCLImageFreezeClass
+struct _GstImageFreezeClass
 {
   GstElementClass parent_class;
 };
 
-GST_EXPORT
-GType gst_climage_freeze_get_type (void);
+GType gst_image_freeze_get_type (void);
 
 G_END_DECLS
 
-#endif /* __GST_CLIMAGE_FREEZE_H__ */
+#endif /* __GST_IMAGE_FREEZE_H__ */
